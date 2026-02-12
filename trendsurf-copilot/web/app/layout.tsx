@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "TrendSurf Copilot - AI-Powered Social Media Pipeline",
-  description: "AI-powered content pipeline for fintech social media. Built for Agents League @ TechConnect.",
+  description: "AI-powered social media content pipeline for Microsoft employees. Built for Agents League @ TechConnect.",
 };
 
 export default function RootLayout({

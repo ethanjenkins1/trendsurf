@@ -11,6 +11,10 @@ import json
 import sys
 from pathlib import Path
 
+# Force unbuffered stdout so Node.js sees STEP markers in real-time
+import functools
+print = functools.partial(print, flush=True)
+
 from dotenv import load_dotenv
 
 from agents.agent_factory import (
@@ -21,6 +25,7 @@ from agents.agent_factory import (
     create_reviewer_agent,
     upload_brand_kit,
     run_agent_turn,
+    run_research_turn,
     cleanup_agents,
 )
 
@@ -67,18 +72,18 @@ def run_pipeline(topic: str):
     assistants = [research_agent, brand_guard_agent, copywriter_agent, reviewer_agent]
 
     try:
-        # ── Step 1: Research Agent ───────────────────────────────
+        # ── Step 1: Research Agent (Responses API + web search) ─
         print("\n" + "─" * 60)
-        print("📡 STEP 1: Research Agent — Searching for trends...")
+        print("📡 STEP 1: Research Agent — Searching the live web...")
         print("─" * 60)
         
-        research_thread = client.beta.threads.create()
         research_prompt = (
-            f"Research the following topic for our fintech audience: '{topic}'. "
+            f"Research the following topic: '{topic}'. "
             f"Find the top 3 most authoritative and recent sources. "
+            f"The research will be used to craft social media posts for a Microsoft employee. "
             f"Provide a comprehensive research brief in the JSON format specified in your instructions."
         )
-        research_output = run_agent_turn(client, research_agent, research_thread.id, research_prompt)
+        research_output = run_research_turn(client, research_agent, research_prompt)
         print(f"\n📋 Research Brief:\n{research_output[:500]}...\n")
         save_output("01_research_brief.md", research_output)
 
@@ -89,8 +94,8 @@ def run_pipeline(topic: str):
 
         guard_thread = client.beta.threads.create()
         guard_prompt = (
-            f"Review the following research brief for brand compliance with FinGuard Capital's policies. "
-            f"Use File Search to retrieve our brand kit and check every rule.\n\n"
+            f"Review the following research brief for brand compliance with Microsoft's employee social media guidelines. "
+            f"Use File Search to retrieve the brand kit and check every rule.\n\n"
             f"RESEARCH BRIEF:\n{research_output}"
         )
         guard_output = run_agent_turn(client, brand_guard_agent, guard_thread.id, guard_prompt)
@@ -104,7 +109,7 @@ def run_pipeline(topic: str):
 
         copy_thread = client.beta.threads.create()
         copy_prompt = (
-            f"Create platform-specific social media posts for FinGuard Capital based on this research "
+            f"Create platform-specific social media posts for a Microsoft employee based on this research "
             f"and compliance feedback.\n\n"
             f"RESEARCH BRIEF:\n{research_output}\n\n"
             f"BRAND COMPLIANCE FEEDBACK:\n{guard_output}\n\n"
@@ -122,7 +127,7 @@ def run_pipeline(topic: str):
 
         review_thread = client.beta.threads.create()
         review_prompt = (
-            f"Perform a final quality review of these social media posts for FinGuard Capital.\n\n"
+            f"Perform a final quality review of these social media posts for a Microsoft employee.\n\n"
             f"ORIGINAL RESEARCH:\n{research_output}\n\n"
             f"BRAND COMPLIANCE REVIEW:\n{guard_output}\n\n"
             f"DRAFT POSTS:\n{copy_output}\n\n"
@@ -166,7 +171,7 @@ if __name__ == "__main__":
     load_dotenv()
 
     if len(sys.argv) < 2:
-        topic = "AI safety and NIST AI Risk Management Framework updates for financial services"
+        topic = "GitHub Copilot agent mode and the future of AI-assisted development"
         print(f"ℹ️  No topic provided. Using default: '{topic}'")
     else:
         topic = " ".join(sys.argv[1:])

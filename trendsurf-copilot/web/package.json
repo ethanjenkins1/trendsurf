@@ -12,6 +12,7 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/uuid": "^10.0.0",
     "eventsource": "^4.1.0",
     "next": "16.1.6",

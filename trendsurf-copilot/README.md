@@ -2,7 +2,7 @@
 
 # 🏄 TrendSurf Copilot
 
-**AI-Powered Social Media Content Pipeline for Fintech**
+**AI-Powered Social Media Content Pipeline for Microsoft Employees**
 
 *Built for Agents League @ TechConnect — Reasoning Agents Track (Microsoft Foundry)*
 
@@ -12,10 +12,10 @@
 
 ## 🎯 What It Does
 
-TrendSurf Copilot transforms trending topics into **brand-safe, platform-ready social media posts** through a multi-agent reasoning pipeline. Give it a topic, and it delivers compliant content for LinkedIn, X/Twitter, and Microsoft Teams — grounded in real sources and verified against your brand policies.
+TrendSurf Copilot transforms trending topics into **brand-safe, platform-ready social media posts** through a multi-agent reasoning pipeline. Give it a topic, and it delivers compliant content for LinkedIn, X/Twitter, and Microsoft Teams — grounded in real-time sources and verified against Microsoft's employee social media communication guidelines.
 
 **Demo prompt:**  
-> *"Generate posts on 'AI safety & NIST updates' for FinGuard Capital"*
+> *"Generate posts on 'GitHub Copilot agent mode' as GitHub Engineering"*
 
 ---
 
@@ -150,7 +150,7 @@ python main.py
 
 # Custom topic
 python main.py "ESG investing trends in 2026"
-python main.py "AI safety and NIST updates for financial services"
+python main.py "GitHub Copilot agent mode and the future of AI-assisted development"
 ```
 
 **Web UI (Recommended):**
@@ -297,7 +297,7 @@ trendsurf-copilot/
 │   ├── agent_factory.py     # Agent creation & lifecycle
 │   └── prompts.py           # All agent system prompts
 ├── data/
-│   ├── brand_kit.md          # FinGuard Capital brand policy
+│   ├── brand_kit.md          # Microsoft employee social media guidelines
 │   └── adaptive_card_template.json
 ├── web/                      # 🌐 Next.js Web UI (NEW)
 │   ├── app/
@@ -328,23 +328,30 @@ trendsurf-copilot/
 
 ---
 
-## 🏢 Brand: FinGuard Capital (Synthetic)
+## Brand Presets
 
-FinGuard Capital is a **synthetic fintech company** created for this demo. The brand kit includes:
+TrendSurf Copilot ships with **10 brand presets** targeting Microsoft and GitHub advocates:
 
-- Brand voice guidelines (professional, authoritative, approachable)
-- Approved and prohibited topics
-- Required disclaimers for regulatory, AI, and market content
-- Platform-specific guidelines (LinkedIn, X/Twitter, Teams)
-- Tone examples (good vs. bad)
+| Preset | Voice | Audience |
+|--------|-------|----------|
+| GitHub Engineering | Technical, community-driven, transparent | Developers, OSS maintainers |
+| Microsoft AI | Authoritative, inclusive, innovation-forward | AI/ML engineers, CTOs |
+| Azure DevOps | Practical, solution-oriented | Platform engineers, SREs |
+| GitHub Advanced Security | Urgent but empowering, shift-left | AppSec teams, CISOs |
+| Microsoft Developer Division | Friendly, pragmatic, code-first | Full-stack developers |
+| GitHub Copilot | Inspiring, evidence-based | Software engineers, startups |
+| Microsoft Security | Authoritative, risk-aware | CISOs, SOC analysts |
+| GitHub Community & Advocacy | Inclusive, celebratory | Student devs, MVPs |
+| Microsoft Sustainability | Mission-driven, data-backed | ESG leads, policy makers |
+| FinGuard Capital (Demo) | Professional, compliance-first | Sample vertical for fintech |
 
 ---
 
 ## 🎬 Demo Storyboard
 
-1. **User**: "Generate posts on 'AI safety & NIST updates' for FinGuard Capital"
-2. **Research Agent**: Searches Bing → finds NIST.gov, Reuters, industry reports → produces research brief
-3. **Brand Guard Agent**: Checks brief against brand kit → flags any policy violations → suggests fixes
+1. **User**: "Generate posts on 'GitHub Copilot agent mode' as GitHub Engineering"
+2. **Research Agent**: Searches the web → finds official docs, GitHub Blog, tech publications → produces research brief
+3. **Brand Guard Agent**: Checks brief against Microsoft employee guidelines → flags any policy violations → suggests fixes
 4. **Copywriter Agent**: Crafts LinkedIn thought-leadership post, punchy tweet, Teams digest
 5. **Reviewer Agent**: Self-critiques all posts → verifies sources, tone, length, disclaimers → approves
 6. **Output**: Adaptive Card with posts, compliance checklist (✅/❌), source links

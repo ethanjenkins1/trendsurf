@@ -5,6 +5,9 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
     // Navigate to the app
     await page.goto('/');
 
+    // Screenshot 1: Landing page
+    await page.screenshot({ path: 'screenshots/01-landing-page.png', fullPage: true });
+
     // Verify Tourist mode is default
     await expect(page.getByTestId('mode-toggle-tourist')).toHaveClass(/bg-zinc-100/);
 
@@ -17,6 +20,9 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
 
     // Wait for pipeline to start (button should show "RUNNING...")
     await expect(page.getByTestId('button-run-demo')).toContainText('RUNNING');
+
+    // Screenshot 2: Pipeline running
+    await page.screenshot({ path: 'screenshots/02-pipeline-running.png', fullPage: true });
 
     // Wait for pipeline visualization to appear
     await expect(page.getByTestId('pipeline-visualization')).toBeVisible({
@@ -31,10 +37,16 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
     await expect(page.getByTestId('pipeline-node-reviewer')).toBeVisible();
     await expect(page.getByTestId('pipeline-node-output')).toBeVisible();
 
-    // Wait for results to appear (timeout: 60 seconds for full pipeline)
+    // Screenshot 3: Pipeline visualization with all nodes
+    await page.screenshot({ path: 'screenshots/03-pipeline-nodes.png', fullPage: true });
+
+    // Wait for results to appear (timeout: 3 min for full live pipeline)
     await expect(page.getByTestId('results-view')).toBeVisible({
-      timeout: 60000,
+      timeout: 180_000,
     });
+
+    // Screenshot 4: Results view (Tourist mode)
+    await page.screenshot({ path: 'screenshots/04-results-tourist.png', fullPage: true });
 
     // Verify LinkedIn card
     const linkedInCard = page.getByTestId('card-linkedin');
@@ -72,6 +84,10 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
     await expect(page.getByTestId('adaptive-card-section')).toBeVisible();
     await expect(page.getByTestId('download-adaptive-card')).toBeVisible();
 
+    // Screenshot 5: Scrolled down — compliance, sources, adaptive card
+    await page.getByTestId('compliance-section').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: 'screenshots/05-compliance-sources.png', fullPage: false });
+
     // Verify all nodes have completed (no running status)
     const researchNode = page.getByTestId('pipeline-node-research');
     await expect(researchNode).not.toContainText('RUNNING', { timeout: 10000 });
@@ -85,6 +101,9 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
 
     // Verify Developer Console appears in Purist mode
     await expect(page.getByTestId('developer-console')).toBeVisible();
+
+    // Screenshot 6: Purist mode — JSON panel + developer console
+    await page.screenshot({ path: 'screenshots/06-purist-mode.png', fullPage: true });
 
     // Verify console tabs
     await expect(page.getByTestId('console-tabs')).toBeVisible();
@@ -115,7 +134,7 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
 
     // Click a chip to populate topic
     await page.getByTestId('topic-chip-0').click();
-    await expect(topicInput).toHaveValue('AI safety & NIST updates');
+    await expect(topicInput).toHaveValue('GitHub Copilot agent mode');
 
     // Verify Generate button is enabled with topic
     await expect(page.getByTestId('button-generate')).toBeEnabled();
