@@ -1,0 +1,16 @@
+# Environment
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Output
+output/*.json
+output/*.md
+output/*.ics
+
+# IDE
+.vscode/
+.idea/
+*.swp

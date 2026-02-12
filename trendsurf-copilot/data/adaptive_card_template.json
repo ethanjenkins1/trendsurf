@@ -1,0 +1,163 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "auto",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "🏄",
+                  "size": "Large"
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "TrendSurf Copilot",
+                  "size": "Large",
+                  "weight": "Bolder",
+                  "color": "Accent"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "AI-Powered Social Media Content Pipeline",
+                  "size": "Small",
+                  "isSubtle": true,
+                  "spacing": "None"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "📌 Topic: ${topic}",
+      "weight": "Bolder",
+      "size": "Medium",
+      "spacing": "Medium"
+    },
+    {
+      "type": "Container",
+      "style": "good",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "🛡️ Compliance Checklist",
+          "weight": "Bolder"
+        },
+        {
+          "type": "FactSet",
+          "facts": [
+            { "title": "Voice & Tone", "value": "✅ Approved" },
+            { "title": "No Prohibited Language", "value": "✅ Passed" },
+            { "title": "Claims Sourced", "value": "✅ Verified" },
+            { "title": "Disclaimers Present", "value": "✅ Included" },
+            { "title": "Platform Compliant", "value": "✅ Passed" },
+            { "title": "Quality Score", "value": "92/100" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "📝 Generated Posts",
+      "weight": "Bolder",
+      "size": "Medium",
+      "spacing": "Medium"
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "**LinkedIn** (1,247 / 1,300 chars)",
+          "weight": "Bolder",
+          "color": "Accent"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${linkedin_post}",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "**X/Twitter** (271 / 280 chars)",
+          "weight": "Bolder",
+          "color": "Accent"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${twitter_post}",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "**Teams Digest**",
+          "weight": "Bolder",
+          "color": "Accent"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${teams_post}",
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "📚 Sources",
+      "weight": "Bolder",
+      "size": "Medium",
+      "spacing": "Medium"
+    },
+    {
+      "type": "TextBlock",
+      "text": "1. ${source_1}\n2. ${source_2}\n3. ${source_3}",
+      "wrap": true,
+      "isSubtle": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "📋 View Full Research Brief",
+      "url": "${research_url}"
+    },
+    {
+      "type": "Action.Submit",
+      "title": "✅ Approve & Schedule",
+      "data": { "action": "approve" }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "🔄 Regenerate",
+      "data": { "action": "regenerate" }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+"""
+TrendSurf Copilot — agents module
+"""
