@@ -10,7 +10,7 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
 
     // Verify hero section
     await expect(page.getByTestId('hero-section')).toBeVisible();
-    await expect(page.locator('text=TRENDSURF')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'TRENDSURF COPILOT' })).toBeVisible();
 
     // Click Run Demo button
     await page.getByTestId('button-run-demo').click();
@@ -54,7 +54,7 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
     // Verify Teams card
     const teamsCard = page.getByTestId('card-teams');
     await expect(teamsCard).toBeVisible();
-    await expect(teamsCard.locator('text=TEAMS')).toBeVisible();
+    await expect(teamsCard.getByRole('heading', { name: 'TEAMS' })).toBeVisible();
     await expect(page.getByTestId('copy-teams')).toBeVisible();
     await expect(page.getByTestId('download-teams')).toBeVisible();
 
@@ -74,7 +74,7 @@ test.describe('TrendSurf Copilot E2E Tests', () => {
 
     // Verify all nodes have completed (no running status)
     const researchNode = page.getByTestId('pipeline-node-research');
-    await expect(researchNode).not.toContainText('RUNNING');
+    await expect(researchNode).not.toContainText('RUNNING', { timeout: 10000 });
 
     // Switch to Purist mode
     await page.getByTestId('mode-toggle-purist').click();

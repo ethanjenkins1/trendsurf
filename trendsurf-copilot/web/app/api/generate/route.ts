@@ -5,7 +5,12 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 // Store for active runs (in production, use Redis or similar)
-const activeRuns = new Map<string, any>();
+// Use globalThis to persist across HMR reloads in Next.js dev mode
+const globalForRuns = globalThis as unknown as { activeRuns: Map<string, any> };
+if (!globalForRuns.activeRuns) {
+  globalForRuns.activeRuns = new Map<string, any>();
+}
+const activeRuns = globalForRuns.activeRuns;
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,6 +73,7 @@ async function executePipeline(
     for (const stage of stages) {
       const stageStarted = new Date().toISOString();
       
+      // Push "running" event
       runState.stages.push({
         name: stage,
         status: 'running',
@@ -78,11 +84,16 @@ async function executePipeline(
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       const stageEnded = new Date().toISOString();
-      const stageIndex = runState.stages.length - 1;
-      runState.stages[stageIndex].status = 'success';
-      runState.stages[stageIndex].endedAt = stageEnded;
-      runState.stages[stageIndex].duration = 2000;
-      runState.stages[stageIndex].summary = `${stage} completed successfully`;
+
+      // Push separate "success" event so SSE picks up the state change
+      runState.stages.push({
+        name: stage,
+        status: 'success',
+        startedAt: stageStarted,
+        endedAt: stageEnded,
+        duration: 2000,
+        summary: `${stage} completed successfully`,
+      });
     }
 
     // Try to execute Python pipeline, but fall back to mock data if it fails
@@ -340,16 +351,22 @@ async function buildAdaptiveCard(
   const templatePath = path.join(process.cwd(), '..', 'data', 'adaptive_card_template.json');
   const template = JSON.parse(await fs.readFile(templatePath, 'utf-8'));
 
+  // Escape a string so it's safe to inject into a JSON string literal
+  function jsonSafe(str: string): string {
+    // JSON.stringify wraps in quotes and escapes internals; strip the outer quotes
+    return JSON.stringify(str).slice(1, -1);
+  }
+
   // Replace placeholders
   let cardJson = JSON.stringify(template);
-  cardJson = cardJson.replace(/\$\{topic\}/g, topic);
-  cardJson = cardJson.replace(/\$\{linkedin_post\}/g, outputs.linkedin.text.substring(0, 200));
-  cardJson = cardJson.replace(/\$\{twitter_post\}/g, outputs.x.text);
-  cardJson = cardJson.replace(/\$\{teams_post\}/g, outputs.teams.text.substring(0, 200));
-  cardJson = cardJson.replace(/\$\{source_1\}/g, sources[0]?.title || 'N/A');
-  cardJson = cardJson.replace(/\$\{source_2\}/g, sources[1]?.title || 'N/A');
-  cardJson = cardJson.replace(/\$\{source_3\}/g, sources[2]?.title || 'N/A');
-  cardJson = cardJson.replace(/\$\{research_url\}/g, sources[0]?.url || 'https://example.com');
+  cardJson = cardJson.replace(/\$\{topic\}/g, jsonSafe(topic));
+  cardJson = cardJson.replace(/\$\{linkedin_post\}/g, jsonSafe(outputs.linkedin.text.substring(0, 200)));
+  cardJson = cardJson.replace(/\$\{twitter_post\}/g, jsonSafe(outputs.x.text));
+  cardJson = cardJson.replace(/\$\{teams_post\}/g, jsonSafe(outputs.teams.text.substring(0, 200)));
+  cardJson = cardJson.replace(/\$\{source_1\}/g, jsonSafe(sources[0]?.title || 'N/A'));
+  cardJson = cardJson.replace(/\$\{source_2\}/g, jsonSafe(sources[1]?.title || 'N/A'));
+  cardJson = cardJson.replace(/\$\{source_3\}/g, jsonSafe(sources[2]?.title || 'N/A'));
+  cardJson = cardJson.replace(/\$\{research_url\}/g, jsonSafe(sources[0]?.url || 'https://example.com'));
 
   return { json: JSON.parse(cardJson) };
 }
