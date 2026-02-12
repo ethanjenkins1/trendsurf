@@ -12,6 +12,41 @@ if (!globalForRuns.activeRuns) {
 }
 const activeRuns = globalForRuns.activeRuns;
 
+/** Read a .env file and return key-value pairs (simple parser). */
+function parseDotEnv(filepath: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  try {
+    const content = require('fs').readFileSync(filepath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = trimmed.substring(0, eqIdx).trim();
+      let value = trimmed.substring(eqIdx + 1).trim();
+      // Strip surrounding quotes
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      result[key] = value;
+    }
+  } catch { /* .env may not exist */ }
+  return result;
+}
+
+/** Strip markdown code fences and parse JSON from agent output. */
+function parseAgentJson(text: string): any | null {
+  if (!text) return null;
+  // Remove ```json ... ``` wrappers
+  const stripped = text.replace(/^```(?:json)?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -67,123 +102,214 @@ async function executePipeline(
   if (!runState) return;
 
   try {
-    // Emit stage events
-    const stages = ['research', 'brand_guard', 'copywriter', 'reviewer'];
+    // Load .env from project root so the Python process gets Azure creds
+    const dotEnv = parseDotEnv(path.join(projectRoot, '.env'));
+    const childEnv = {
+      ...process.env,
+      ...dotEnv,
+      // Force UTF-8 so emoji/unicode chars in print() don't crash on Windows cp1252
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      // Force unbuffered stdout so stage markers stream in real-time (not batched at exit)
+      PYTHONUNBUFFERED: '1',
+    };
 
-    for (const stage of stages) {
-      const stageStarted = new Date().toISOString();
-      
-      // Push "running" event
-      runState.stages.push({
-        name: stage,
-        status: 'running',
-        startedAt: stageStarted,
-      });
+    // Resolve Python – prefer the project venv
+    const isWin = process.platform === 'win32';
+    const venvPython = path.join(
+      projectRoot,
+      '.venv',
+      isWin ? 'Scripts' : 'bin',
+      isWin ? 'python.exe' : 'python'
+    );
 
-      // Simulate stage processing
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      const stageEnded = new Date().toISOString();
-
-      // Push separate "success" event so SSE picks up the state change
-      runState.stages.push({
-        name: stage,
-        status: 'success',
-        startedAt: stageStarted,
-        endedAt: stageEnded,
-        duration: 2000,
-        summary: `${stage} completed successfully`,
-      });
+    let pythonPath: string;
+    try {
+      await fs.access(venvPython);
+      pythonPath = venvPython;
+    } catch {
+      pythonPath = process.env.PYTHON_PATH || 'python';
     }
 
-    // Try to execute Python pipeline, but fall back to mock data if it fails
-    let useMockData = false;
-    try {
-      const pythonPath = process.env.PYTHON_PATH || 'python';
-      const mainPath = path.join(projectRoot, 'main.py');
+    const mainPath = path.join(projectRoot, 'main.py');
 
-      const pythonProcess = spawn(pythonPath, [mainPath, topic], {
-        cwd: projectRoot,
-        env: { ...process.env },
+    // Stage names in order
+    const stages = ['research', 'brand_guard', 'copywriter', 'reviewer'];
+    const stageLabelsInLog: Record<string, string> = {
+      'STEP 1': 'research',
+      'STEP 2': 'brand_guard',
+      'STEP 3': 'copywriter',
+      'STEP 4': 'reviewer',
+    };
+    let currentStageIdx = -1;
+
+    // Helper: push a stage event
+    const startStage = (name: string) => {
+      runState.stages.push({
+        name,
+        status: 'running',
+        startedAt: new Date().toISOString(),
       });
-
-      let stdout = '';
-      let stderr = '';
-
-      pythonProcess.stdout.on('data', (data) => {
-        stdout += data.toString();
+    };
+    const endStage = (name: string) => {
+      runState.stages.push({
+        name,
+        status: 'success',
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+        summary: `${name} completed`,
       });
+    };
 
-      pythonProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
+    // Spawn the real Python pipeline
+    console.log(`[pipeline] Spawning: ${pythonPath} -u ${mainPath} "${topic}"`);
+    const pythonProcess = spawn(pythonPath, ['-u', mainPath, topic], {
+      cwd: projectRoot,
+      env: childEnv,
+    });
 
-      await new Promise((resolve, reject) => {
-        pythonProcess.on('close', (code) => {
-          if (code === 0) {
-            resolve(null);
-          } else {
-            console.log('Python pipeline failed, using mock data instead');
-            useMockData = true;
-            resolve(null); // Don't reject, just use mock data
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+
+      // Detect stage transitions from pipeline log output
+      for (const [label, stage] of Object.entries(stageLabelsInLog)) {
+        if (chunk.includes(label)) {
+          // End previous stage if any
+          if (currentStageIdx >= 0) {
+            endStage(stages[currentStageIdx]);
           }
-        });
-      });
-    } catch (error) {
-      console.log('Python execution failed, using mock data');
-      useMockData = true;
+          currentStageIdx = stages.indexOf(stage);
+          startStage(stage);
+          console.log(`[pipeline] ▸ Stage detected: ${stage} @ ${new Date().toISOString()}`);
+        }
+      }
+    });
+
+    pythonProcess.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    const exitCode = await new Promise<number | null>((resolve) => {
+      pythonProcess.on('close', (code) => resolve(code));
+      // Safety timeout: 3 minutes
+      setTimeout(() => {
+        try { pythonProcess.kill(); } catch {}
+        resolve(null);
+      }, 180_000);
+    });
+
+    // Close last stage
+    if (currentStageIdx >= 0) {
+      endStage(stages[currentStageIdx]);
+    }
+    // Fill any stages that weren't detected (shouldn't happen, but be safe)
+    for (const s of stages) {
+      if (!runState.stages.find((e: any) => e.name === s && e.status === 'success')) {
+        startStage(s);
+        endStage(s);
+      }
+    }
+
+    const useMockData = exitCode !== 0;
+
+    if (useMockData) {
+      console.log(`[pipeline] Python exited ${exitCode}, stderr: ${stderr.slice(0, 500)}`);
+    } else {
+      console.log('[pipeline] Python pipeline completed successfully');
     }
 
     let outputs, compliance, sources, artifacts;
 
-    if (useMockData) {
+    if (!useMockData) {
+      // ── Parse real pipeline outputs ─────────────────────────
+      try {
+        const pipelineResultPath = path.join(outputDir, 'pipeline_result.json');
+        const raw = await fs.readFile(pipelineResultPath, 'utf-8');
+        const pipelineResult = JSON.parse(raw);
+
+        // Parse the JSON-in-markdown agent outputs
+        const postsJson = parseAgentJson(pipelineResult.posts);
+        const complianceJson = parseAgentJson(pipelineResult.compliance);
+        const researchJson = parseAgentJson(pipelineResult.research);
+
+        // Extract posts
+        if (postsJson?.posts) {
+          outputs = {
+            linkedin: {
+              text: postsJson.posts.linkedin?.content || 'LinkedIn post content',
+            },
+            x: {
+              text: postsJson.posts.twitter?.content || 'Twitter post content',
+              charCount: (postsJson.posts.twitter?.content || '').length,
+            },
+            teams: {
+              text: postsJson.posts.teams?.content || 'Teams post content',
+            },
+          };
+        } else {
+          outputs = getMockOutputs(topic);
+        }
+
+        // Extract compliance
+        if (complianceJson) {
+          const checklist = complianceJson.checklist || {};
+          compliance = {
+            checklist: [
+              { item: 'Voice & Tone', status: checklist.voice_tone ? 'pass' : 'fail', notes: checklist.voice_tone ? 'Professional and authoritative' : 'Needs adjustment' },
+              { item: 'No Prohibited Language', status: checklist.no_prohibited_language ? 'pass' : 'fail', notes: checklist.no_prohibited_language ? 'All content approved' : 'Prohibited terms found' },
+              { item: 'Claims Sourced', status: checklist.claims_sourced ? 'pass' : 'fail', notes: checklist.claims_sourced ? 'All claims verified' : 'Unsourced claims found' },
+              { item: 'Disclaimers Present', status: checklist.disclaimers_present ? 'pass' : 'fail', notes: checklist.disclaimers_present ? 'Required disclaimers included' : 'Missing disclaimers' },
+              { item: 'Platform Compliant', status: checklist.platform_compliant ? 'pass' : 'fail', notes: checklist.platform_compliant ? 'Character limits respected' : 'Platform limits exceeded' },
+              { item: 'Audience Appropriate', status: checklist.audience_appropriate ? 'pass' : 'fail', notes: checklist.audience_appropriate ? 'Suitable for target audience' : 'Audience mismatch' },
+            ],
+            disclaimers: postsJson?.disclaimers_included || [
+              'This is informational only and does not constitute legal or financial advice.',
+              'AI-generated content has been reviewed by our compliance team.',
+            ],
+          };
+        } else {
+          compliance = getMockCompliance();
+        }
+
+        // Extract sources
+        if (researchJson?.sources && researchJson.sources.length > 0) {
+          sources = researchJson.sources.map((s: any) => ({
+            title: s.title,
+            url: s.url,
+          }));
+        } else {
+          sources = extractSources(pipelineResult.research || '');
+        }
+
+        artifacts = {
+          researchBriefPath: 'output/01_research_brief.md',
+          brandReviewPath: 'output/02_brand_guard_review.md',
+          draftPostsPath: 'output/03_draft_posts.md',
+          finalReviewPath: 'output/04_final_review.md',
+          pipelineResultPath: 'output/pipeline_result.json',
+        };
+      } catch (parseErr: any) {
+        console.error('[pipeline] Error parsing outputs, falling back to mock:', parseErr.message);
+        outputs = getMockOutputs(topic);
+        compliance = getMockCompliance();
+        sources = getMockSources(topic);
+        artifacts = {
+          researchBriefPath: 'output/01_research_brief.md',
+          brandReviewPath: 'output/02_brand_guard_review.md',
+          draftPostsPath: 'output/03_draft_posts.md',
+          finalReviewPath: 'output/04_final_review.md',
+          pipelineResultPath: 'output/pipeline_result.json',
+        };
+      }
+    } else {
       // Use mock data for demo/testing
       outputs = getMockOutputs(topic);
       compliance = getMockCompliance();
       sources = getMockSources(topic);
-      artifacts = {
-        researchBriefPath: 'output/01_research_brief.md',
-        brandReviewPath: 'output/02_brand_guard_review.md',
-        draftPostsPath: 'output/03_draft_posts.md',
-        finalReviewPath: 'output/04_final_review.md',
-        pipelineResultPath: 'output/pipeline_result.json',
-      };
-    } else {
-      // Read pipeline outputs
-      const pipelineResultPath = path.join(outputDir, 'pipeline_result.json');
-      const pipelineResult = JSON.parse(
-        await fs.readFile(pipelineResultPath, 'utf-8')
-      );
-
-      outputs = {
-        linkedin: {
-          text: extractLinkedInPost(pipelineResult.posts),
-        },
-        x: {
-          text: extractTwitterPost(pipelineResult.posts),
-          charCount: extractTwitterPost(pipelineResult.posts).length,
-        },
-        teams: {
-          text: extractTeamsPost(pipelineResult.posts),
-        },
-      };
-
-      compliance = {
-        checklist: [
-          { item: 'Voice & Tone', status: 'pass', notes: 'Professional and authoritative' },
-          { item: 'No Prohibited Language', status: 'pass', notes: 'All content approved' },
-          { item: 'Claims Sourced', status: 'pass', notes: 'All claims verified' },
-          { item: 'Disclaimers Present', status: 'pass', notes: 'Required disclaimers included' },
-          { item: 'Platform Compliant', status: 'pass', notes: 'Character limits respected' },
-        ],
-        disclaimers: [
-          'This is informational only and does not constitute legal or financial advice.',
-          'AI-generated content has been reviewed by our compliance team.',
-        ],
-      };
-
-      sources = extractSources(pipelineResult.research);
-
       artifacts = {
         researchBriefPath: 'output/01_research_brief.md',
         brandReviewPath: 'output/02_brand_guard_review.md',
@@ -220,51 +346,51 @@ async function executePipeline(
 function getMockOutputs(topic: string) {
   return {
     linkedin: {
-      text: `🔒 ${topic} — What Finance Leaders Need to Know
+      text: `${topic} — Why This Matters for Engineering Teams
 
-The landscape is evolving rapidly. Here are three key takeaways for risk management teams:
+The landscape is evolving rapidly. Here are three key takeaways:
 
-• **Governance First**: New frameworks emphasize proactive oversight and documentation
-• **Risk-Based Approach**: Tailored strategies based on actual impact and likelihood
-• **Continuous Monitoring**: Compliance is no longer a one-time checkbox
+- **Community-driven innovation**: Open-source contributions are accelerating progress
+- **Practical impact**: Engineering teams can adopt these practices today
+- **Forward-looking**: The implications for developer productivity are significant
 
-As AI becomes integral to financial services, staying ahead of regulatory guidance isn't optional—it's essential. Our team at ${topic.includes('NIST') ? 'FinGuard Capital' : 'our firm'} helps institutions navigate these complexities with confidence.
+As someone working in this space, I'm excited to see how the community is pushing boundaries. What's your take?
 
-What's your organization's biggest challenge in this space? Let's discuss. 💬
+Views expressed are my own and do not necessarily reflect those of Microsoft.
 
-#FinTech #AIinFinance #RiskManagement #Compliance #NIST #RegTech`,
+#Microsoft #DevCommunity #OpenSource #AI #Engineering`,
     },
     x: {
-      text: `🔒 ${topic.substring(0, 30)}... — 3 key takeaways for finance leaders:
+      text: `${topic.substring(0, 60)} — 3 key takeaways for engineering teams:
 
-✓ Governance-first frameworks
-✓ Risk-based strategies  
-✓ Continuous monitoring
+- Community-driven innovation
+- Practical, adopt-today impact
+- Developer productivity gains
 
-Staying ahead isn't optional. #FinTech #AI`,
+#DevCommunity #AI`,
       charCount: 180,
     },
     teams: {
-      text: `**📋 ${topic} — Internal Digest**
+      text: `**${topic} — Internal Digest**
 
 **What Changed:**
-- New regulatory guidance released with expanded requirements
-- Industry best practices updated to reflect current threat landscape
+- New developments in this space with significant community traction
+- Updated best practices and frameworks
 
 **Why It Matters:**
-- Direct impact on our risk management protocols
-- Compliance obligations for Q1 2026 deliverables
+- Direct impact on our engineering practices
+- Opportunity to contribute and lead in the community
 - Competitive advantage through early adoption
 
 **What to Do Next:**
-- Review teams: Schedule assessment meeting by Feb 20
-- Compliance: Update internal documentation by Mar 1
-- Leadership: Approve budget allocation for implementation
+- Engineering leads: Review and discuss in next team sync
+- DevRel: Consider blog post or community engagement
+- Product: Evaluate integration opportunities
 
 **Resources:**
-- Internal policy doc: /docs/compliance/2026-updates
-- Training modules: /learning/risk-frameworks
-- Point of contact: compliance@finguardcapital.com`,
+- Official documentation and links
+- Community discussion threads
+- Internal Teams channel: #engineering-trends`,
     },
   };
 }
@@ -272,52 +398,35 @@ Staying ahead isn't optional. #FinTech #AI`,
 function getMockCompliance() {
   return {
     checklist: [
-      { item: 'Voice & Tone', status: 'pass', notes: 'Professional and authoritative tone maintained' },
-      { item: 'No Prohibited Language', status: 'pass', notes: 'No investment promises or competitor mentions' },
+      { item: 'Voice & Tone', status: 'pass', notes: 'Empowering, inclusive, and technically credible' },
+      { item: 'No Prohibited Language', status: 'pass', notes: 'No competitor disparagement or confidential info' },
       { item: 'Claims Sourced', status: 'pass', notes: 'All statements backed by authoritative sources' },
-      { item: 'Disclaimers Present', status: 'pass', notes: 'Required regulatory disclaimers included' },
+      { item: 'Disclaimers Present', status: 'pass', notes: 'Personal views disclaimer included' },
       { item: 'Platform Compliant', status: 'pass', notes: 'Character limits and format guidelines met' },
-      { item: 'Brand Voice Alignment', status: 'pass', notes: 'Consistent with FinGuard Capital standards' },
+      { item: 'Employee-Ready', status: 'pass', notes: 'Appropriate for a Microsoft employee to share publicly' },
     ],
     disclaimers: [
-      'This is informational only and does not constitute legal or financial advice. Consult a qualified professional for guidance specific to your situation.',
-      'AI-generated content has been reviewed by our compliance team.',
+      'Views expressed are my own and do not necessarily reflect those of Microsoft.',
+      'AI-assisted content — reviewed for accuracy before publishing.',
     ],
   };
 }
 
 function getMockSources(topic: string) {
-  const baseUrl = topic.toLowerCase().includes('nist') ? 'nist.gov' : 'example.com';
   return [
     {
-      title: 'NIST AI Risk Management Framework',
-      url: `https://www.${baseUrl}/itl/ai-risk-management-framework`,
+      title: 'Microsoft Engineering Blog',
+      url: 'https://devblogs.microsoft.com/',
     },
     {
-      title: 'Financial Services AI Governance Guidelines',
-      url: 'https://www.federalreserve.gov/ai-guidance',
+      title: 'GitHub Blog — Engineering',
+      url: 'https://github.blog/engineering/',
     },
     {
-      title: 'Industry Report: AI Safety in Finance 2026',
-      url: 'https://www.fintechreport.com/ai-safety-2026',
+      title: 'The New Stack — Cloud Native',
+      url: 'https://thenewstack.io/',
     },
   ];
-}
-
-function extractLinkedInPost(postsText: string): string {
-  // Simple extraction - in production, use proper markdown parsing
-  const match = postsText.match(/### LinkedIn[\s\S]*?\n([\s\S]*?)(?=\n###|\n\n##|$)/i);
-  return match ? match[1].trim() : 'LinkedIn post content';
-}
-
-function extractTwitterPost(postsText: string): string {
-  const match = postsText.match(/### (?:X\/)?Twitter[\s\S]*?\n([\s\S]*?)(?=\n###|\n\n##|$)/i);
-  return match ? match[1].trim() : 'Twitter post content';
-}
-
-function extractTeamsPost(postsText: string): string {
-  const match = postsText.match(/### (?:Microsoft )?Teams[\s\S]*?\n([\s\S]*?)(?=\n###|\n\n##|$)/i);
-  return match ? match[1].trim() : 'Teams post content';
 }
 
 function extractSources(researchText: string): any[] {
@@ -336,9 +445,9 @@ function extractSources(researchText: string): any[] {
   return sources.length > 0
     ? sources
     : [
-        { title: 'NIST AI Risk Management Framework', url: 'https://www.nist.gov/ai' },
-        { title: 'Financial Services AI Guidelines', url: 'https://example.com/ai-guidelines' },
-        { title: 'Industry Report on AI Safety', url: 'https://example.com/report' },
+        { title: 'Microsoft Engineering Blog', url: 'https://devblogs.microsoft.com/' },
+        { title: 'GitHub Blog', url: 'https://github.blog/' },
+        { title: 'The New Stack', url: 'https://thenewstack.io/' },
       ];
 }
 

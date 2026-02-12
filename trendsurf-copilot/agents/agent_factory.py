@@ -1,17 +1,22 @@
 """
 TrendSurf Copilot — Agent Factory
-Creates and manages the 4-agent chain using Azure OpenAI Assistants API
-(the same runtime that powers Microsoft Foundry Agent Service).
+Creates and manages the 4-agent chain using Azure OpenAI.
 
 Agents:
-  1. Research Agent     – Bing-grounded research (ReAct pattern)
-  2. Brand Guard Agent  – Policy compliance via File Search (CoT pattern)
-  3. Copywriter Agent   – Platform-specific post generation
-  4. Reviewer Agent     – Self-critique quality check (Self-Reflection pattern)
+  1. Research Agent     – Web-grounded research via Responses API (ReAct pattern)
+  2. Brand Guard Agent  – Policy compliance via File Search / Assistants API (CoT pattern)
+  3. Copywriter Agent   – Platform-specific post generation / Assistants API
+  4. Reviewer Agent     – Self-critique quality check / Assistants API (Self-Reflection pattern)
+
+The Research Agent uses the Responses API with `web_search_preview` for live web
+search.  The remaining agents use the Assistants API for thread-based turns with
+File Search (Brand Guard) or plain chat.
 """
 
+import json
 import os
 import time
+
 from openai import AzureOpenAI
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
@@ -21,6 +26,17 @@ from agents.prompts import (
     COPYWRITER_AGENT_PROMPT,
     REVIEWER_AGENT_PROMPT,
 )
+
+# ── Sentinel used by main.py to distinguish agent types ─────────────
+
+class _ResponsesAgent:
+    """Lightweight wrapper representing a Responses-API based agent."""
+
+    def __init__(self, name: str, instructions: str, model: str):
+        self.id = f"responses-agent-{name}"
+        self.name = name
+        self.instructions = instructions
+        self.model = model
 
 
 def create_openai_client() -> AzureOpenAI:
@@ -32,7 +48,7 @@ def create_openai_client() -> AzureOpenAI:
     return AzureOpenAI(
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_ad_token_provider=token_provider,
-        api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-01-01-preview"),
+        api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
     )
 
 
@@ -46,16 +62,19 @@ def get_model_name() -> str:
 
 def create_research_agent(client: AzureOpenAI):
     """
-    Research Agent — uses reasoning to find authoritative sources on a topic.
-    Reasoning pattern: ReAct (Thought → Action → Observation)
+    Research Agent — uses the Responses API with ``web_search_preview`` to search
+    the web for authoritative sources.
+
+    Returns a lightweight ``_ResponsesAgent`` sentinel; call
+    ``run_research_turn()`` instead of ``run_agent_turn()`` for this agent.
     """
-    assistant = client.beta.assistants.create(
-        model=get_model_name(),
+    agent = _ResponsesAgent(
         name="TrendSurf Research Agent",
         instructions=RESEARCH_AGENT_PROMPT,
+        model=get_model_name(),
     )
-    print(f"  ✅ Research Agent created: {assistant.id}")
-    return assistant
+    print(f"  ✅ Research Agent created: {agent.id} (web_search_preview via Responses API)")
+    return agent
 
 
 def create_brand_guard_agent(client: AzureOpenAI, vector_store_id: str):
@@ -113,7 +132,7 @@ def upload_brand_kit(client: AzureOpenAI, brand_kit_path: str) -> str:
 
     # Create vector store with the file
     vector_store = client.vector_stores.create(
-        name="FinGuard Capital Brand Kit",
+        name="Microsoft Employee Social Media Guidelines",
         file_ids=[file_obj.id],
     )
     print(f"  📦 Vector store created: {vector_store.id}")
@@ -136,9 +155,27 @@ def upload_brand_kit(client: AzureOpenAI, brand_kit_path: str) -> str:
 # ── Run an agent turn ───────────────────────────────────────────────
 
 
+def run_research_turn(client: AzureOpenAI, agent: _ResponsesAgent, user_message: str) -> str:
+    """
+    Execute a Research Agent turn using the **Responses API** with
+    ``web_search_preview`` so the model can search the live web.
+
+    This is a single-shot call (no thread); all context is in-prompt.
+    """
+    combined_input = f"{agent.instructions}\n\n---\n\nUser request:\n{user_message}"
+
+    response = client.responses.create(
+        model=agent.model,
+        input=combined_input,
+        tools=[{"type": "web_search_preview"}],
+    )
+
+    return response.output_text
+
+
 def run_agent_turn(client: AzureOpenAI, assistant, thread_id: str, user_message: str) -> str:
     """
-    Send a message to an assistant thread and return the response.
+    Send a message to an Assistants-API thread and return the response.
     Polls for completion with backoff.
     """
     # Add user message
@@ -157,11 +194,14 @@ def run_agent_turn(client: AzureOpenAI, assistant, thread_id: str, user_message:
     # Poll until complete
     while True:
         run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+
         if run.status == "completed":
             break
+
         if run.status in ("failed", "cancelled", "expired"):
             print(f"  ❌ Run {run.status}: {run.last_error}")
             return f"ERROR: Agent run {run.status} — {run.last_error}"
+
         time.sleep(2)
 
     # Get the latest assistant message
@@ -181,8 +221,11 @@ def run_agent_turn(client: AzureOpenAI, assistant, thread_id: str, user_message:
 
 
 def cleanup_agents(client: AzureOpenAI, assistants: list):
-    """Delete all assistants to avoid resource leakage."""
+    """Delete all assistants to avoid resource leakage.  Responses-API agents are skipped."""
     for asst in assistants:
+        if isinstance(asst, _ResponsesAgent):
+            print(f"  ⏭️  Skipped (Responses API): {asst.name}")
+            continue
         try:
             client.beta.assistants.delete(asst.id)
             print(f"  🗑️  Deleted: {asst.name} ({asst.id})")

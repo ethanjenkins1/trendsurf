@@ -11,7 +11,7 @@ export default function Hero() {
       </div>
       
       <p className="text-2xl text-zinc-400 font-light mb-2">
-        AI-Powered Social Media Content Pipeline for Fintech
+        AI-Powered Social Media Content Pipeline for Microsoft Employees
       </p>
       
       <p className="text-sm text-zinc-600 font-mono mb-12">
