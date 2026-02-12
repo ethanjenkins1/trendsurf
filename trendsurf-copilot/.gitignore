@@ -14,3 +14,16 @@ output/*.ics
 .vscode/
 .idea/
 *.swp
+
+# Web UI (Next.js)
+web/node_modules/
+web/.next/
+web/out/
+web/dist/
+web/.env.local
+web/.env.development.local
+web/.env.test.local
+web/.env.production.local
+web/playwright-report/
+web/test-results/
+web/.DS_Store
